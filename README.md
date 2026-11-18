@@ -1,17 +1,58 @@
-# filedock
+# 🗂️ NanDocs
 
-A new Flutter project.
+Быстрый и минималистичный док-менеджер избранных файлов, папок и программ для **Linux (x86_64)**, написанный на Flutter. ⚡
 
-## Getting Started
+## ✨ Возможности
+- 🖱️ **Drag & Drop:** перетаскивайте любые файлы и папки из файлового менеджера прямо в окно приложения.
+- 📁 **Умные категории:** создавайте собственные вкладки для проектов, документов, программ и медиа.
+- 🚀 **Запуск в один клик:** открывайте документы и видео штатными программами или запускайте `.AppImage` и скрипты напрямую.
+- 📂 **Быстрый переход:** открывайте папку расположения любого закреплённого файла одной кнопкой.
+- 🔗 **Без дублирования данных:** приложение хранит только пути к оригиналам в `~/.file_dock.json` и не занимает лишнее место на диске.
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## 📦 Быстрая установка (Linux x86_64)
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Приложение распространяется в формате автономного **AppImage** и подходит для любых 64-битных дистрибутивов Linux на процессорах Intel/AMD (Ubuntu, Zorin OS, Linux Mint, Debian, Fedora, Arch и др.).
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### 1. Скачивание файлов ⬇️
+1. Перейдите во вкладку **[Releases](../../releases)** справа и скачайте файл **`NanDocs-x86_64.AppImage`**.
+2. Также сохраните файл **`logo.png`** из корня этого репозитория, если хотите добавить программу в меню приложений со штатной иконкой.
+3. Создайте удобную папку в домашней директории (например, `~/nandocs`) и поместите туда оба файла (`NanDocs-x86_64.AppImage` и `logo.png`).
+
+### 2. Права на запуск 🔑
+Откройте терминал в папке с файлами и разрешите выполнение:
+```bash
+chmod +x ~/nandocs/NanDocs-x86_64.AppImage
+```
+*(После этого программу уже можно запускать двойным кликом мыши).*
+
+### 3. Добавление в меню приложений Linux (Zorin OS, Ubuntu, Mint) 🖥️
+Чтобы **NanDocs** отображался в главном меню с иконкой и закреплялся на панели задач, создайте ярлык `.desktop` одной командой (замените `ВАШЕ_ИМЯ` на имя вашего пользователя в системе):
+
+```bash
+cat << 'EOF' > ~/.local/share/applications/nandocs.desktop
+[Desktop Entry]
+Type=Application
+Name=NanDocs
+Comment=Быстрый док для избранных файлов и папок
+Exec=/home/ВАШЕ_ИМЯ/nandocs/NanDocs-x86_64.AppImage
+Icon=/home/ВАШЕ_ИМЯ/nandocs/logo.png
+Categories=Utility;FileManager;
+Terminal=false
+StartupWMClass=NanDocs
+EOF
+
+update-desktop-database ~/.local/share/applications/
+```
+
+---
+
+## 💡 Полезные мелочи
+- **Где хранится список:** все ваши категории и ярлыки сохраняются локально в файл `~/.file_dock.json` — вы легко можете перенести его на другой компьютер.
+- **Безопасность файлов:** удаление плитки из NanDocs убирает только ссылку на файл, сами ваши файлы и папки на диске остаются нетронутыми.
+
+---
+
+## ⭐ Поддержка проекта
+Если утилита помогла навести порядок на рабочем столе и ускорила доступ к нужным файлам — поставьте **звёздочку (Star)** этому репозиторию в правом верхнем углу! Буду рад идеям и предложениям во вкладке **Issues** 🙌
