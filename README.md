@@ -34,14 +34,21 @@ chmod +x NanDocs-x86_64.AppImage
 ### 3. Добавление в меню приложений Linux (Zorin OS, Ubuntu, Mint) 🖥️
 Просто скопируйте и выполните эту команду в терминале — система сама подставит ваш путь:
 
+### 3. Добавление в меню приложений Linux (Zorin OS, Ubuntu, Mint) 🖥️
+Просто скопируйте и выполните эту команду в терминале — она сама найдёт скачанный файл в вашей домашней папке и создаст ярлык в меню:
+
 ```bash
+APP_PATH=(find "HOME" -maxdepth 4 -name "NanDocs-x86_64.AppImage" 2>/dev/null | head -n 1)
+APP_DIR=(dirname "APP_PATH")
+chmod +x "\$APP_PATH"
+
 cat << EOF > ~/.local/share/applications/nandocs.desktop
 [Desktop Entry]
 Type=Application
 Name=NanDocs
 Comment=Быстрый док для избранных файлов и программ
-Exec=env GDK_BACKEND=x11 \$HOME/Documents/NanDocs/NanDocs-x86_64.AppImage
-Icon=\$HOME/Documents/NanDocs/logo.png
+Exec=env GDK_BACKEND=x11 \$APP_PATH
+Icon=\$APP_DIR/logo.png
 Categories=Utility;FileManager;
 Terminal=false
 StartupWMClass=NanDocs
@@ -49,6 +56,7 @@ EOF
 
 update-desktop-database ~/.local/share/applications/
 ```
+
 
 
 ---
