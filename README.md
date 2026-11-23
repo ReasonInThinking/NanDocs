@@ -57,12 +57,16 @@ update-desktop-database ~/.local/share/applications/
 ### Запуск из терминала (опционально) ⌨️
 Если вы привыкли запускать программы из консоли, добавьте функцию `nandocs` в ваш `~/.bashrc`. Она сама найдёт `NanDocs-x86_64.AppImage` и запустит его в фоне:
 
+
+### 4. Запуск из терминала (опционально) ⌨️
+Если вы привыкли запускать программы из консоли, добавьте функцию `nandocs` в ваш `~/.bashrc`. Она сама найдёт `NanDocs-x86_64.AppImage` и запустит его в фоне:
+
 ```bash
 cat << 'EOF' >> ~/.bashrc
 
 nandocs() {
   local app
-  app=(find "HOME" -maxdepth 4 -name "NanDocs-x86_64.AppImage" 2>/dev/null | head -n 1)
+  app=`find ~ -maxdepth 4 -name "NanDocs-x86_64.AppImage" 2>/dev/null | head -n 1`
   if [ -n "\$app" ]; then
     nohup env GDK_BACKEND=x11 "\$app" >/dev/null 2>&1 &
   else
@@ -78,6 +82,8 @@ source ~/.bashrc
 ```bash
 nandocs
 ```
+
+
 
 
 
