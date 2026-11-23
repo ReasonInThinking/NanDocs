@@ -65,9 +65,16 @@ update-desktop-database ~/.local/share/applications/
 ### 4. Запуск из терминала (опционально) ⌨️
 Если вы привыкли запускать программы из консоли, добавьте функцию `nandocs` в ваш `~/.bashrc`. Она сама найдёт `NanDocs-x86_64.AppImage` и запустит его в фоне:
 
-```bash
-cat << 'EOF' >> ~/.bashrc
+### 4. Запуск из терминала (опционально) ⌨️
+Если вы привыкли запускать программы из консоли, добавьте функцию `nandocs` в ваш `~/.bashrc`. Она сама найдёт `NanDocs-x86_64.AppImage` и запустит его в фоне:
 
+```bash
+python3 -c '
+import os
+p = os.path.expanduser("~/.bashrc")
+content = open(p).read() if os.path.exists(p) else ""
+if "nandocs()" not in content:
+    func = """
 nandocs() {
   local app
   app=`find ~ -maxdepth 4 -name "NanDocs-x86_64.AppImage" 2>/dev/null | head -n 1`
@@ -77,15 +84,16 @@ nandocs() {
     echo "Файл NanDocs-x86_64.AppImage не найден"
   fi
 }
-EOF
-
-source ~/.bashrc
+"""
+    open(p, "w").write(content.rstrip() + "\n" + func)
+' && source ~/.bashrc
 ```
 
 Теперь программу можно открыть из любой директории терминала просто введя:
 ```bash
 nandocs
 ```
+
 
 
 
