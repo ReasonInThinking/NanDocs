@@ -8,24 +8,21 @@ void main() {
   runApp(const NanDocsApp());
 }
 
-
 // ==========================================
 // ЕДИНЫЙ СТИЛЬ (ТЕМА)
 // ==========================================
 class DockTheme {
   static const Color bgMain = Color(0xFF0E1116);
   static const Color bgSurface = Color(0xFF161B22);
-  static const Color bgHover = Color(0xFF1F2630);
   static const Color border = Color(0xFF30363D);
   static const Color accent = Color(0xFF3B82F6);
   static const Color textPrimary = Color(0xFFE6EDF3);
   static const Color textMuted = Color(0xFF8B949E);
-
   static const double radius = 12.0;
 }
 
 // ==========================================
-// МОДЕЛЬ ЗАКРЕПЛЁННОГО ФАЙЛА
+// МОДЕЛЬ ЗАКРЕПЛЁННОГО ФАЙЛА ИЛИ ПРОГРАММЫ
 // ==========================================
 class DockItem {
   String id;
@@ -33,6 +30,8 @@ class DockItem {
   String path;
   String category;
   bool isDirectory;
+  bool isApp;
+  String execCommand;
 
   DockItem({
     required this.id,
@@ -40,6 +39,8 @@ class DockItem {
     required this.path,
     required this.category,
     required this.isDirectory,
+    this.isApp = false,
+    this.execCommand = '',
   });
 
   Map<String, dynamic> toJson() => {
@@ -48,6 +49,8 @@ class DockItem {
         'path': path,
         'category': category,
         'isDirectory': isDirectory,
+        'isApp': isApp,
+        'execCommand': execCommand,
       };
 
   factory DockItem.fromJson(Map<String, dynamic> json) => DockItem(
@@ -56,6 +59,8 @@ class DockItem {
         path: json['path']?.toString() ?? '',
         category: json['category']?.toString() ?? 'Общее',
         isDirectory: json['isDirectory'] == true,
+        isApp: json['isApp'] == true,
+        execCommand: json['execCommand']?.toString() ?? '',
       );
 }
 
@@ -85,6 +90,110 @@ class NanDocsApp extends StatelessWidget {
   }
 }
 
+
+// ==========================================
+// ПАРСЕР ЯРЛЫКОВ (.desktop) И СКАНЕР ПРОГРАММ LINUX
+// ==========================================
+class DesktopAppInfo {
+  final String name;
+  final String exec;
+  final String desktopPath;
+
+  DesktopAppInfo({
+    required this.name,
+    required this.exec,
+    required this.desktopPath,
+  });
+}
+
+class LinuxAppScanner {
+  static Future<DesktopAppInfo?> parseDesktopFile(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) return null;
+
+      final lines = await file.readAsLines();
+      String? nameEn;
+      String? nameRu;
+      String? execCmd;
+      bool noDisplay = false;
+      bool inDesktopEntry = false;
+
+      for (final rawLine in lines) {
+        final line = rawLine.trim();
+        if (line.isEmpty || line.startsWith('#')) continue;
+
+        if (line.startsWith('[')) {
+          inDesktopEntry = (line == '[Desktop Entry]');
+          continue;
+        }
+        if (!inDesktopEntry) continue;
+
+        if (line.startsWith('NoDisplay=true') || line.startsWith('Hidden=true')) {
+          noDisplay = true;
+        } else if (line.startsWith('Name[ru]=')) {
+          nameRu = line.substring('Name[ru]='.length).trim();
+        } else if (line.startsWith('Name=')) {
+          nameEn = line.substring('Name='.length).trim();
+        } else if (line.startsWith('Exec=')) {
+          execCmd = line.substring('Exec='.length).trim();
+        }
+      }
+
+      if (noDisplay || execCmd == null || execCmd.isEmpty) return null;
+
+      final cleanExec = execCmd
+          .replaceAll(RegExp(r'\s+%[a-zA-Z]'), '')
+          .trim();
+
+      final displayName = (nameRu != null && nameRu.isNotEmpty)
+          ? nameRu
+          : (nameEn ?? file.uri.pathSegments.last.replaceAll('.desktop', ''));
+
+      return DesktopAppInfo(
+        name: displayName,
+        exec: cleanExec,
+        desktopPath: filePath,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<List<DesktopAppInfo>> scanInstalledApps() async {
+    final home = Platform.environment['HOME'] ?? '';
+    final dirs = [
+      '/usr/share/applications',
+      '/usr/local/share/applications',
+      '$home/.local/share/applications',
+      '/var/lib/flatpak/exports/share/applications',
+      '$home/.local/share/flatpak/exports/share/applications',
+      '/var/lib/snapd/desktop/applications',
+    ];
+
+    final Map<String, DesktopAppInfo> uniqueApps = {};
+
+    for (final dirPath in dirs) {
+      final dir = Directory(dirPath);
+      if (!await dir.exists()) continue;
+
+      try {
+        for (final entity in dir.listSync()) {
+          if (entity is File && entity.path.endsWith('.desktop')) {
+            final parsed = await parseDesktopFile(entity.path);
+            if (parsed != null && !uniqueApps.containsKey(parsed.name)) {
+              uniqueApps[parsed.name] = parsed;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    final list = uniqueApps.values.toList();
+    list.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+}
 
 
 class DockHomeScreen extends StatefulWidget {
@@ -193,26 +302,51 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
     );
   }
 
+
   Future<void> _addPaths(List<String> paths) async {
     if (paths.isEmpty) return;
 
     final targetCategory = _selectedCategory == 'Все'
-        ? (_categories.length > 1 ? _categories[1] : 'Общее')
+        ? (_categories.length > 1 ? _categories[1] : 'Программы')
         : _selectedCategory;
 
     int addedCount = 0;
 
-    setState(() {
-      for (final rawPath in paths) {
-        final cleanPath = rawPath.trim();
-        if (cleanPath.isEmpty) continue;
+    for (final rawPath in paths) {
+      final cleanPath = rawPath.trim();
+      if (cleanPath.isEmpty) continue;
 
-        final alreadyExists = _items.any((item) => item.path == cleanPath);
-        if (alreadyExists) continue;
+      final alreadyExists = _items.any((item) => item.path == cleanPath);
+      if (alreadyExists) continue;
 
-        final isDir = FileSystemEntity.isDirectorySync(cleanPath);
-        final name = cleanPath.split('/').where((s) => s.isNotEmpty).last;
+      // Если перетащили ярлык приложения (.desktop)
+      if (cleanPath.toLowerCase().endsWith('.desktop')) {
+        final appInfo = await LinuxAppScanner.parseDesktopFile(cleanPath);
+        if (appInfo != null) {
+          setState(() {
+            _items.insert(
+              0,
+              DockItem(
+                id: '${DateTime.now().microsecondsSinceEpoch}_$addedCount',
+                name: appInfo.name,
+                path: cleanPath,
+                category: targetCategory,
+                isDirectory: false,
+                isApp: true,
+                execCommand: appInfo.exec,
+              ),
+            );
+          });
+          addedCount++;
+          continue;
+        }
+      }
 
+      // Обычный файл, папка или .AppImage
+      final isDir = FileSystemEntity.isDirectorySync(cleanPath);
+      final name = cleanPath.split('/').where((s) => s.isNotEmpty).last;
+
+      setState(() {
         _items.insert(
           0,
           DockItem(
@@ -223,16 +357,45 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
             isDirectory: isDir,
           ),
         );
-        addedCount++;
-      }
-    });
+      });
+      addedCount++;
+    }
 
     if (addedCount > 0) {
       await _saveData();
       _showToast('Добавлено в «$targetCategory»: $addedCount');
     } else {
-      _showToast('Этот файл уже есть в списке');
+      _showToast('Этот элемент уже есть в списке');
     }
+  }
+
+  Future<void> _addAppFromCatalog(DesktopAppInfo appInfo) async {
+    final targetCategory = _selectedCategory == 'Все'
+        ? (_categories.length > 1 ? _categories[1] : 'Программы')
+        : _selectedCategory;
+
+    final alreadyExists = _items.any((item) => item.path == appInfo.desktopPath);
+    if (alreadyExists) {
+      _showToast('«${appInfo.name}» уже есть в избранном');
+      return;
+    }
+
+    setState(() {
+      _items.insert(
+        0,
+        DockItem(
+          id: DateTime.now().microsecondsSinceEpoch.toString(),
+          name: appInfo.name,
+          path: appInfo.desktopPath,
+          category: targetCategory,
+          isDirectory: false,
+          isApp: true,
+          execCommand: appInfo.exec,
+        ),
+      );
+    });
+    await _saveData();
+    _showToast('Программа «${appInfo.name}» добавлена');
   }
 
   Future<void> _pickFiles() async {
@@ -251,16 +414,26 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
   }
 
   Future<void> _launchItem(DockItem item) async {
-    final exists = item.isDirectory
-        ? await Directory(item.path).exists()
-        : await File(item.path).exists();
-
-    if (!exists) {
-      _showToast('Файл не найден по старому пути!', isError: true);
-      return;
-    }
-
     try {
+      if (item.isApp && item.execCommand.isNotEmpty) {
+        await Process.start(
+          'bash',
+          ['-c', item.execCommand],
+          mode: ProcessStartMode.detached,
+        );
+        _showToast('Запуск: ${item.name}');
+        return;
+      }
+
+      final exists = item.isDirectory
+          ? await Directory(item.path).exists()
+          : await File(item.path).exists();
+
+      if (!exists) {
+        _showToast('Файл не найден по старому пути!', isError: true);
+        return;
+      }
+
       if (!item.isDirectory && item.path.toLowerCase().endsWith('.appimage')) {
         await Process.run('chmod', ['+x', item.path]);
         await Process.start(
@@ -278,7 +451,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
       }
       _showToast('Запуск: ${item.name}');
     } catch (e) {
-      _showToast('Не удалось открыть файл', isError: true);
+      _showToast('Не удалось запустить', isError: true);
     }
   }
 
@@ -293,6 +466,129 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
     } else {
       _showToast('Папка не найдена', isError: true);
     }
+  }
+
+
+  Future<void> _showAppCatalogDialog() async {
+    final allApps = await LinuxAppScanner.scanInstalledApps();
+    if (!mounted) return;
+
+    String query = '';
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final filteredApps = allApps.where((app) {
+            final q = query.trim().toLowerCase();
+            return q.isEmpty ||
+                app.name.toLowerCase().contains(q) ||
+                app.exec.toLowerCase().contains(q);
+          }).toList();
+
+          return AlertDialog(
+            backgroundColor: DockTheme.bgSurface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(DockTheme.radius),
+              side: const BorderSide(color: DockTheme.border),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.window_rounded, color: Color(0xFFEF4444)),
+                SizedBox(width: 10),
+                Text('Установленные программы'),
+              ],
+            ),
+            content: SizedBox(
+              width: 480,
+              height: 440,
+              child: Column(
+                children: [
+                  TextField(
+                    autofocus: true,
+                    onChanged: (val) => setDialogState(() => query = val),
+                    decoration: InputDecoration(
+                      hintText: 'Поиск программы (Telegram, Браузер, Код...)',
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      filled: true,
+                      fillColor: DockTheme.bgMain,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: filteredApps.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'Ничего не найдено',
+                              style: TextStyle(color: DockTheme.textMuted),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: filteredApps.length,
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1, color: DockTheme.border),
+                            itemBuilder: (context, index) {
+                              final app = filteredApps[index];
+                              final alreadyAdded =
+                                  _items.any((i) => i.path == app.desktopPath);
+
+                              return ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.window_rounded,
+                                  color: Color(0xFFEF4444),
+                                ),
+                                title: Text(
+                                  app.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w500,
+                                    color: DockTheme.textPrimary,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  app.exec,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: DockTheme.textMuted,
+                                  ),
+                                ),
+                                trailing: alreadyAdded
+                                    ? const Icon(Icons.check, color: Colors.greenAccent, size: 18)
+                                    : IconButton(
+                                        tooltip: 'Добавить в NanDocs',
+                                        icon: const Icon(Icons.add_circle_outline,
+                                            color: DockTheme.accent),
+                                        onPressed: () async {
+                                          await _addAppFromCatalog(app);
+                                          setDialogState(() {});
+                                        },
+                                      ),
+                                onTap: () async {
+                                  await _addAppFromCatalog(app);
+                                  if (context.mounted) Navigator.pop(context);
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Закрыть', style: TextStyle(color: DockTheme.textMuted)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
 
@@ -311,7 +607,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
           controller: controller,
           autofocus: true,
           decoration: InputDecoration(
-            hintText: 'Например: Игры, Музыка, Книги...',
+            hintText: 'Например: Игры, Музыка, Учёба...',
             filled: true,
             fillColor: DockTheme.bgMain,
             border: OutlineInputBorder(
@@ -346,9 +642,10 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
 
   Future<void> _editItemDialog(DockItem item) async {
     final nameController = TextEditingController(text: item.name);
+    final cmdController = TextEditingController(text: item.execCommand);
     String chosenCat = _categories.contains(item.category) && item.category != 'Все'
         ? item.category
-        : (_categories.length > 1 ? _categories[1] : 'Общее');
+        : (_categories.length > 1 ? _categories[1] : 'Программы');
 
     final availableCats = _categories.where((c) => c != 'Все').toList();
     if (!availableCats.contains(chosenCat)) {
@@ -378,7 +675,19 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-              const SizedBox(height: 16),
+              if (item.isApp) ...[
+                const SizedBox(height: 14),
+                TextField(
+                  controller: cmdController,
+                  decoration: InputDecoration(
+                    labelText: 'Команда запуска (Exec)',
+                    filled: true,
+                    fillColor: DockTheme.bgMain,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
               const Text('Категория:', style: TextStyle(color: DockTheme.textMuted)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
@@ -410,6 +719,9 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                   setState(() {
                     item.name = nameController.text.trim();
                     item.category = chosenCat;
+                    if (item.isApp) {
+                      item.execCommand = cmdController.text.trim();
+                    }
                   });
                   await _saveData();
                 }
@@ -424,6 +736,9 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
   }
 
   (IconData, Color) _getFileStyle(DockItem item) {
+    if (item.isApp) {
+      return (Icons.window_rounded, const Color(0xFFEF4444));
+    }
     if (item.isDirectory) {
       return (Icons.folder_rounded, const Color(0xFFF59E0B));
     }
@@ -447,6 +762,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
   }
 
 
+
   @override
   Widget build(BuildContext context) {
     final q = _searchQuery.trim().toLowerCase();
@@ -455,7 +771,8 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
           _selectedCategory == 'Все' || item.category == _selectedCategory;
       final matchesSearch = q.isEmpty ||
           item.name.toLowerCase().contains(q) ||
-          item.path.toLowerCase().contains(q);
+          item.path.toLowerCase().contains(q) ||
+          item.execCommand.toLowerCase().contains(q);
       return matchesCat && matchesSearch;
     }).toList();
 
@@ -475,14 +792,25 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
           FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: DockTheme.bgSurface,
+              foregroundColor: const Color(0xFFEF4444),
+              side: const BorderSide(color: DockTheme.border),
+            ),
+            onPressed: _showAppCatalogDialog,
+            icon: const Icon(Icons.window_rounded, size: 18),
+            label: const Text('Программа'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: DockTheme.bgSurface,
               foregroundColor: DockTheme.textPrimary,
               side: const BorderSide(color: DockTheme.border),
             ),
             onPressed: _pickFolder,
             icon: const Icon(Icons.create_new_folder_outlined, size: 18),
-            label: const Text('Добавить папку'),
+            label: const Text('Папка'),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           FilledButton.icon(
             style: FilledButton.styleFrom(
               backgroundColor: DockTheme.accent,
@@ -490,27 +818,27 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
             ),
             onPressed: _pickFiles,
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('Добавить файл'),
+            label: const Text('Файл'),
           ),
           const SizedBox(width: 16),
         ],
       ),
       body: DropTarget(
-    onDrop: (detail) async {
-      setState(() => _isDragging = false);
-      final paths = <String>[];
-      for (final item in detail.items) {
-        if (item is DropFileItem && item.localPath != null) {
-          paths.add(item.localPath!);
-        } else if (item is DropDirectoryItem && item.localPath != null) {
-          paths.add(item.localPath!);
-        }
-      }
-      await _addPaths(paths);
-    },
-    onEnter: (_) => setState(() => _isDragging = true),
-    onLeave: () => setState(() => _isDragging = false),
-    child: Stack(
+        onDrop: (detail) async {
+          setState(() => _isDragging = false);
+          final paths = <String>[];
+          for (final item in detail.items) {
+            if (item is DropFileItem && item.localPath != null) {
+              paths.add(item.localPath!);
+            } else if (item is DropDirectoryItem && item.localPath != null) {
+              paths.add(item.localPath!);
+            }
+          }
+          await _addPaths(paths);
+        },
+        onEnter: (_) => setState(() => _isDragging = true),
+        onLeave: () => setState(() => _isDragging = false),
+        child: Stack(
           children: [
             Column(
               children: [
@@ -585,7 +913,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                       ),
                       const SizedBox(width: 16),
                       SizedBox(
-                        width: 260,
+                        width: 240,
                         child: TextField(
                           controller: _searchController,
                           onChanged: (val) => setState(() => _searchQuery = val),
@@ -608,6 +936,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                   ),
                 ),
 
+
                 // СЕТКА ПЛИТОК
                 Expanded(
                   child: filtered.isEmpty
@@ -620,7 +949,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                                   color: DockTheme.textMuted.withOpacity(0.5)),
                               const SizedBox(height: 16),
                               const Text(
-                                'Перетащите сюда любые файлы или папки',
+                                'Перетащите сюда файл или директорию',
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w500,
@@ -629,7 +958,7 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                               ),
                               const SizedBox(height: 6),
                               const Text(
-                                'Или воспользуйтесь кнопками добавления в верхнем углу',
+                                'Или выберите установленную программу через кнопку вверху',
                                 style: TextStyle(color: DockTheme.textMuted),
                               ),
                             ],
@@ -658,7 +987,11 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                                   color: DockTheme.bgSurface,
                                   borderRadius:
                                       BorderRadius.circular(DockTheme.radius),
-                                  border: Border.all(color: DockTheme.border),
+                                  border: Border.all(
+                                    color: item.isApp
+                                        ? iconColor.withOpacity(0.35)
+                                        : DockTheme.border,
+                                  ),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -675,16 +1008,45 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                                           child: Icon(iconData,
                                               color: iconColor, size: 22),
                                         ),
+                                        if (item.isApp) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: iconColor.withOpacity(0.15),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                              border: Border.all(
+                                                color: iconColor.withOpacity(0.5),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              'APP',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                                color: iconColor,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                         const Spacer(),
-                                        IconButton(
-                                          tooltip: 'Открыть папку с файлом',
-                                          icon: const Icon(
-                                              Icons.folder_open_rounded,
-                                              size: 18,
-                                              color: DockTheme.textMuted),
-                                          onPressed: () =>
-                                              _openParentFolder(item),
-                                        ),
+
+
+                                        if (!item.isApp)
+                                          IconButton(
+                                            tooltip: 'Открыть папку с файлом',
+                                            icon: const Icon(
+                                                Icons.folder_open_rounded,
+                                                size: 18,
+                                                color: DockTheme.textMuted),
+                                            onPressed: () =>
+                                                _openParentFolder(item),
+                                          ),
                                         IconButton(
                                           tooltip: 'Изменить имя / категорию',
                                           icon: const Icon(Icons.edit_outlined,
@@ -718,7 +1080,9 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      item.category,
+                                      item.isApp
+                                          ? '${item.category} • Программа'
+                                          : item.category,
                                       style: const TextStyle(
                                         fontSize: 12,
                                         color: DockTheme.textMuted,
@@ -772,3 +1136,4 @@ class _DockHomeScreenState extends State<DockHomeScreen> {
     );
   }
 }
+
